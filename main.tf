@@ -345,6 +345,10 @@ locals {
     initial_position     = var.initial_position
 
     config_hash = local.config_hash
+
+    byte_limit    = var.byte_limit
+    record_limit  = var.record_limit
+    time_limit_ms = var.time_limit_ms
   })
 
   user_data = templatefile("${path.module}/templates/user-data.sh.tmpl", {
