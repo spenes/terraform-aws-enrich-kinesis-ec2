@@ -5,7 +5,7 @@
     "vendor": "com.snowplowanalytics.snowplow",
     "enabled": true,
     "parameters": {
-      "uri": "s3://snowplow-hosted-assets/third-party/ua-parser",
+      "uri": "https://snowplow-hosted-assets.s3.eu-west-1.amazonaws.com/third-party/ua-parser",
       "database": "regexes-latest.yaml"
     }
   }
