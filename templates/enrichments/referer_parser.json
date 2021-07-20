@@ -6,7 +6,7 @@
     "enabled": true,
     "parameters": {
       "database": "referers-latest.json",
-      "uri": "s3://snowplow-hosted-assets/third-party/referer-parser/",
+      "uri": "https://snowplow-hosted-assets.s3.eu-west-1.amazonaws.com/third-party/referer-parser/",
       "internalDomains": []
     }
   }
