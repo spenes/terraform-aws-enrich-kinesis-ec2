@@ -30,6 +30,18 @@
         "maxSize": ${byte_limit}
       }
     }
+     %{ if incomplete_stream_name != ""}
+    "incomplete": {
+      "type": "Kinesis"
+      "streamName": "${incomplete_stream_name}"
+      "region": "${region}"
+      "maxBufferedTime": ${time_limit_ms} millis
+      "collection": {
+        "maxCount": ${record_limit}
+        "maxSize": ${byte_limit}
+      }
+    }
+    %{ endif}
   }
 
   "assetsUpdatePeriod": "${assets_update_period}"

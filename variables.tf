@@ -186,6 +186,12 @@ variable "bad_stream_name" {
   type        = string
 }
 
+variable "incomplete_stream_name" {
+  description = "The name of the incomplete kinesis stream that the Enricher will insert bad data into. If omitted then the incomplete events feature will be disabled"
+  type        = string
+  default = ""
+}
+
 variable "initial_position" {
   description = "Where to start processing the input Kinesis Stream from (TRIM_HORIZON or LATEST)"
   default     = "TRIM_HORIZON"

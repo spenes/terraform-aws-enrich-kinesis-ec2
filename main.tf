@@ -151,6 +151,10 @@ EOF
   permissions_boundary = var.iam_permissions_boundary
 }
 
+locals {
+  incomplete_tmpl_for_iam = var.incomplete_stream_name == "" ? "" : "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.incomplete_stream_name},"
+}
+
 resource "aws_iam_policy" "iam_policy" {
   name = var.name
 
@@ -166,6 +170,7 @@ resource "aws_iam_policy" "iam_policy" {
         "kinesis:List*"
       ],
       "Resource": [
+        ${local.incomplete_tmpl_for_iam}
         "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.in_stream_name}",
         "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.enriched_stream_name}",
         "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.bad_stream_name}"
@@ -186,6 +191,7 @@ resource "aws_iam_policy" "iam_policy" {
         "kinesis:Put*"
       ],
       "Resource": [
+        ${local.incomplete_tmpl_for_iam}
         "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.enriched_stream_name}",
         "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.bad_stream_name}"
       ]
@@ -351,6 +357,7 @@ locals {
     in_stream_name       = var.in_stream_name
     enriched_stream_name = var.enriched_stream_name
     bad_stream_name      = var.bad_stream_name
+    incomplete_stream_name = var.incomplete_stream_name
     region               = data.aws_region.current.name
     initial_position     = var.initial_position
 
