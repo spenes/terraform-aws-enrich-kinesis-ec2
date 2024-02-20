@@ -152,7 +152,7 @@ EOF
 }
 
 locals {
-  incomplete_tmpl_for_iam = var.incomplete_stream_name == "" ? "" : "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.incomplete_stream_name},"
+  incomplete_tmpl_for_iam = var.incomplete_stream_name == "" ? "" : "\"arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.incomplete_stream_name}\","
 }
 
 resource "aws_iam_policy" "iam_policy" {
