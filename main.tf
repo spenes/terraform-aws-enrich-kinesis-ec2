@@ -353,13 +353,13 @@ module "instance_type_metrics" {
 
 locals {
   hocon = templatefile("${path.module}/templates/config.hocon.tmpl", {
-    app_name             = var.name
-    in_stream_name       = var.in_stream_name
-    enriched_stream_name = var.enriched_stream_name
-    bad_stream_name      = var.bad_stream_name
+    app_name               = var.name
+    in_stream_name         = var.in_stream_name
+    enriched_stream_name   = var.enriched_stream_name
+    bad_stream_name        = var.bad_stream_name
     incomplete_stream_name = var.incomplete_stream_name
-    region               = data.aws_region.current.name
-    initial_position     = var.initial_position
+    region                 = data.aws_region.current.name
+    initial_position       = var.initial_position
 
     config_hash = local.config_hash
 
