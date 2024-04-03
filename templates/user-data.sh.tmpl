@@ -5,6 +5,10 @@ sudo base64 --decode << EOF > $${CONFIG_DIR}/enrich.hocon
 ${config_b64}
 EOF
 
+%{ if is_private_ecr_registry }
+aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${private_ecr_registry}
+%{ endif ~}
+
 sudo docker run \
   -d \
   --name enrich \
@@ -23,7 +27,7 @@ sudo docker run \
   --env JDK_JAVA_OPTIONS='${java_opts}' \
   --env ACCEPT_LIMITED_USE_LICENSE=${accept_limited_use_license} \
   --env INSTANCE_ID=$(get_instance_id) \
-  snowplow/snowplow-enrich-kinesis:${version} \
+  ${private_ecr_registry}snowplow/snowplow-enrich-kinesis:${version} \
   --config /snowplow/config/enrich.hocon \
   --iglu-config ${resolver} \
   --enrichments ${enrichments}

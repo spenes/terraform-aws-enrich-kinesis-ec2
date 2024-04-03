@@ -24,6 +24,25 @@ locals {
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
+locals {
+  is_aws_global = replace(data.aws_region.current.name, "cn-", "") == data.aws_region.current.name
+  iam_partition = local.is_aws_global ? "aws" : "aws-cn"
+
+  is_private_ecr_registry = var.private_ecr_registry != ""
+  private_ecr_registry_statement = [{
+    Action = [
+      "ecr:GetAuthorizationToken",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer"
+    ]
+    Effect = "Allow"
+    Resource = [
+      "*"
+    ]
+  }]
+  private_ecr_registry_statement_final = local.is_private_ecr_registry ? local.private_ecr_registry_statement : []
+}
+
 module "telemetry" {
   source  = "snowplow-devops/telemetry/snowplow"
   version = "0.5.0"
@@ -112,22 +131,20 @@ resource "aws_cloudwatch_log_group" "log_group" {
 # --- IAM: Roles & Permissions
 
 locals {
-  custom_s3_hosted_assets_bucket_policy = <<EOF
-    ,{
-      "Action": [
-        "s3:GetObject",
-        "s3:GetObjectVersion",
-        "s3:ListBucket"
-      ],
-      "Effect":"Allow",
-      "Resource": [
-        "arn:aws:s3:::${var.custom_s3_hosted_assets_bucket_name}",
-        "arn:aws:s3:::${var.custom_s3_hosted_assets_bucket_name}/*"
-      ]
-    }
-EOF
+  custom_s3_hosted_assets_bucket_statement = [{
+    Action = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:ListBucket"
+    ]
+    Effect = "Allow"
+    Resource = [
+      "arn:${local.iam_partition}:s3:::${var.custom_s3_hosted_assets_bucket_name}",
+      "arn:${local.iam_partition}:s3:::${var.custom_s3_hosted_assets_bucket_name}/*"
+    ]
+  }]
 
-  custom_s3_hosted_assets_bucket_policy_final = var.custom_s3_hosted_assets_bucket_name == "" ? "" : local.custom_s3_hosted_assets_bucket_policy
+  custom_s3_hosted_assets_bucket_statement_final = var.custom_s3_hosted_assets_bucket_name != "" ? local.custom_s3_hosted_assets_bucket_statement : []
 }
 
 resource "aws_iam_role" "iam_role" {
@@ -154,120 +171,122 @@ EOF
 resource "aws_iam_policy" "iam_policy" {
   name = var.name
 
-  policy = <<EOF
-{
-  "Version" : "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "kinesis:DescribeStream",
-        "kinesis:DescribeStreamSummary",
-        "kinesis:List*"
-      ],
-      "Resource": [
-        "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.in_stream_name}",
-        "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.enriched_stream_name}",
-        "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.bad_stream_name}"
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = concat(
+      local.private_ecr_registry_statement_final,
+      local.custom_s3_hosted_assets_bucket_statement_final,
+      [
+        {
+          Effect = "Allow",
+          Action = [
+            "kinesis:DescribeStream",
+            "kinesis:DescribeStreamSummary",
+            "kinesis:List*"
+          ],
+          Resource = [
+            "arn:${local.iam_partition}:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.in_stream_name}",
+            "arn:${local.iam_partition}:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.enriched_stream_name}",
+            "arn:${local.iam_partition}:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.bad_stream_name}"
+          ]
+        },
+        {
+          Effect = "Allow",
+          Action = [
+            "kinesis:Get*"
+          ],
+          Resource = [
+            "arn:${local.iam_partition}:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.in_stream_name}"
+          ]
+        },
+        {
+          Effect = "Allow",
+          Action = [
+            "kinesis:Put*"
+          ],
+          Resource = [
+            "arn:${local.iam_partition}:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.enriched_stream_name}",
+            "arn:${local.iam_partition}:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.bad_stream_name}"
+          ]
+        },
+        {
+          Effect = "Allow",
+          Action = [
+            "dynamodb:BatchWriteItem",
+            "dynamodb:PutItem",
+            "dynamodb:DescribeTable",
+            "dynamodb:DeleteItem",
+            "dynamodb:GetItem",
+            "dynamodb:Scan",
+            "dynamodb:UpdateItem"
+          ],
+          Resource = [
+            "${aws_dynamodb_table.kcl.arn}"
+          ]
+        },
+        {
+          Effect = "Allow",
+          Action = [
+            "dynamodb:DescribeTable",
+            "dynamodb:GetItem",
+            "dynamodb:Scan"
+          ],
+          Resource = [
+            "${aws_dynamodb_table.config.arn}"
+          ]
+        },
+        {
+          Effect = "Allow",
+          Action = [
+            "logs:PutLogEvents",
+            "logs:CreateLogStream",
+            "logs:DescribeLogStreams"
+          ],
+          Resource = [
+            "arn:${local.iam_partition}:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:${local.cloudwatch_log_group_name}:*"
+          ]
+        },
+        {
+          Effect = "Allow",
+          Action = [
+            "s3:GetObject",
+            "s3:GetObjectVersion",
+            "s3:ListBucket"
+          ],
+          Resource = [
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-us-east-1",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-us-east-1/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-us-west-1",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-us-west-1/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-us-west-2",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-us-west-2/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-sa-east-1",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-sa-east-1/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-eu-central-1",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-eu-central-1/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-southeast-1",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-southeast-1/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-southeast-2",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-southeast-2/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-northeast-1",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-northeast-1/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-south-1",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-south-1/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-us-east-2",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-us-east-2/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ca-central-1",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ca-central-1/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-eu-west-2",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-eu-west-2/*",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-northeast-2",
+            "arn:${local.iam_partition}:s3:::snowplow-hosted-assets-ap-northeast-2/*"
+          ]
+        }
       ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "kinesis:Get*"
-      ],
-      "Resource": [
-        "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.in_stream_name}"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "kinesis:Put*"
-      ],
-      "Resource": [
-        "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.enriched_stream_name}",
-        "arn:aws:kinesis:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stream/${var.bad_stream_name}"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:BatchWriteItem",
-        "dynamodb:PutItem",
-        "dynamodb:DescribeTable",
-        "dynamodb:DeleteItem",
-        "dynamodb:GetItem",
-        "dynamodb:Scan",
-        "dynamodb:UpdateItem"
-      ],
-      "Resource": [
-        "${aws_dynamodb_table.kcl.arn}"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:DescribeTable",
-        "dynamodb:GetItem",
-        "dynamodb:Scan"
-      ],
-      "Resource": [
-        "${aws_dynamodb_table.config.arn}"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "logs:PutLogEvents",
-        "logs:CreateLogStream",
-        "logs:DescribeLogStreams"
-      ],
-      "Resource": [
-        "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:${local.cloudwatch_log_group_name}:*"
-      ]
-    },
-    {
-      "Action": [
-        "s3:GetObject",
-        "s3:GetObjectVersion",
-        "s3:ListBucket"
-      ],
-      "Effect":"Allow",
-      "Resource": [
-        "arn:aws:s3:::snowplow-hosted-assets",
-        "arn:aws:s3:::snowplow-hosted-assets/*",
-        "arn:aws:s3:::snowplow-hosted-assets-us-east-1",
-        "arn:aws:s3:::snowplow-hosted-assets-us-east-1/*",
-        "arn:aws:s3:::snowplow-hosted-assets-us-west-1",
-        "arn:aws:s3:::snowplow-hosted-assets-us-west-1/*",
-        "arn:aws:s3:::snowplow-hosted-assets-us-west-2",
-        "arn:aws:s3:::snowplow-hosted-assets-us-west-2/*",
-        "arn:aws:s3:::snowplow-hosted-assets-sa-east-1",
-        "arn:aws:s3:::snowplow-hosted-assets-sa-east-1/*",
-        "arn:aws:s3:::snowplow-hosted-assets-eu-central-1",
-        "arn:aws:s3:::snowplow-hosted-assets-eu-central-1/*",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-southeast-1",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-southeast-1/*",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-southeast-2",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-southeast-2/*",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-northeast-1",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-northeast-1/*",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-south-1",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-south-1/*",
-        "arn:aws:s3:::snowplow-hosted-assets-us-east-2",
-        "arn:aws:s3:::snowplow-hosted-assets-us-east-2/*",
-        "arn:aws:s3:::snowplow-hosted-assets-ca-central-1",
-        "arn:aws:s3:::snowplow-hosted-assets-ca-central-1/*",
-        "arn:aws:s3:::snowplow-hosted-assets-eu-west-2",
-        "arn:aws:s3:::snowplow-hosted-assets-eu-west-2/*",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-northeast-2",
-        "arn:aws:s3:::snowplow-hosted-assets-ap-northeast-2/*"
-      ]
-    }${local.custom_s3_hosted_assets_bucket_policy_final}
-  ]
-}
-EOF
+    )
+  })
 }
 
 resource "aws_iam_role_policy_attachment" "policy_attachment" {
@@ -387,6 +406,10 @@ locals {
 
     container_memory = "${module.instance_type_metrics.memory_application_mb}m"
     java_opts        = var.java_opts
+
+    is_private_ecr_registry = local.is_private_ecr_registry
+    private_ecr_registry    = var.private_ecr_registry
+    region                  = data.aws_region.current.name
   })
 }
 
